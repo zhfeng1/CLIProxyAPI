@@ -299,6 +299,11 @@ nonstream-keepalive-interval: 0
 #     prefix: "test" # optional: require calls like "test/kimi-k2" to target this provider's credentials
 #     base-url: "https://openrouter.ai/api/v1" # The base URL of the provider.
 #     disable-cooling: false # optional: per-provider override for auth/model cooldown scheduling
+#     scheduled-test: # optional: periodically test this provider with an OpenAI chat-completions ping
+#       enabled: false
+#       model: "kimi-k2" # client-visible model ID to test; defaults to the first configured model when omitted
+#       cron: "*/30 * * * *" # standard 5-field cron: minute hour day month weekday
+#       max-results: 20 # number of recent in-memory results retained for management APIs
 #     headers:
 #       X-Custom-Header: "custom-value"
 #     api-key-entries:

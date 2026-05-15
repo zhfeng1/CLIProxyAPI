@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/scheduledtest"
 )
 
 // Generic helpers for list[string]
@@ -449,6 +450,10 @@ func (h *Handler) PutOpenAICompat(c *gin.Context) {
 	}
 	filtered := make([]config.OpenAICompatibility, 0, len(arr))
 	for i := range arr {
+		if err := validateProviderScheduledTest(arr[i].ScheduledTest); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		normalizeOpenAICompatibilityEntry(&arr[i])
 		if strings.TrimSpace(arr[i].BaseURL) != "" {
 			filtered = append(filtered, arr[i])
@@ -469,6 +474,7 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 		APIKeyEntries *[]config.OpenAICompatibilityAPIKey `json:"api-key-entries"`
 		Models        *[]config.OpenAICompatibilityModel  `json:"models"`
 		Headers       *map[string]string                  `json:"headers"`
+		ScheduledTest *config.ProviderScheduledTest       `json:"scheduled-test"`
 	}
 	var body struct {
 		Name  *string            `json:"name"`
@@ -529,10 +535,32 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 	if body.Value.Headers != nil {
 		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
 	}
+	if body.Value.ScheduledTest != nil {
+		if err := validateProviderScheduledTest(body.Value.ScheduledTest); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		entry.ScheduledTest = body.Value.ScheduledTest
+	}
 	normalizeOpenAICompatibilityEntry(&entry)
 	h.cfg.OpenAICompatibility[targetIndex] = entry
 	h.cfg.SanitizeOpenAICompatibility()
 	h.persistLocked(c)
+}
+
+func (h *Handler) GetOpenAICompatScheduledTestResults(c *gin.Context) {
+	results := map[string][]scheduledtest.Result{}
+	if h.scheduledTestResults != nil {
+		results = h.scheduledTestResults()
+	}
+	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
+		c.JSON(200, gin.H{
+			"provider": provider,
+			"results":  results[provider],
+		})
+		return
+	}
+	c.JSON(200, gin.H{"results": results})
 }
 
 func (h *Handler) DeleteOpenAICompat(c *gin.Context) {
@@ -1088,6 +1116,13 @@ func normalizeOpenAICompatibilityEntry(entry *config.OpenAICompatibility) {
 	// Trim base-url; empty base-url indicates provider should be removed by sanitization
 	entry.BaseURL = strings.TrimSpace(entry.BaseURL)
 	entry.Headers = config.NormalizeHeaders(entry.Headers)
+	if entry.ScheduledTest != nil {
+		entry.ScheduledTest.Model = strings.TrimSpace(entry.ScheduledTest.Model)
+		entry.ScheduledTest.Cron = strings.Join(strings.Fields(entry.ScheduledTest.Cron), " ")
+		if entry.ScheduledTest.MaxResults < 0 {
+			entry.ScheduledTest.MaxResults = 0
+		}
+	}
 	existing := make(map[string]struct{}, len(entry.APIKeyEntries))
 	for i := range entry.APIKeyEntries {
 		trimmed := strings.TrimSpace(entry.APIKeyEntries[i].APIKey)
@@ -1096,6 +1131,24 @@ func normalizeOpenAICompatibilityEntry(entry *config.OpenAICompatibility) {
 			existing[trimmed] = struct{}{}
 		}
 	}
+}
+
+func validateProviderScheduledTest(entry *config.ProviderScheduledTest) error {
+	if entry == nil || !entry.Enabled {
+		return nil
+	}
+	entry.Model = strings.TrimSpace(entry.Model)
+	entry.Cron = strings.Join(strings.Fields(entry.Cron), " ")
+	if entry.Cron == "" {
+		return fmt.Errorf("scheduled-test.cron is required")
+	}
+	if err := scheduledtest.ValidateCronExpression(entry.Cron); err != nil {
+		return fmt.Errorf("scheduled-test.cron is invalid: %w", err)
+	}
+	if entry.MaxResults < 0 {
+		return fmt.Errorf("scheduled-test.max-results must be >= 0")
+	}
+	return nil
 }
 
 func normalizedOpenAICompatibilityEntries(entries []config.OpenAICompatibility) []config.OpenAICompatibility {

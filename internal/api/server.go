@@ -32,6 +32,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/scheduledtest"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
@@ -222,6 +223,9 @@ type Server struct {
 	// pluginHost owns dynamic plugin Management API route dispatch.
 	pluginHost *pluginhost.Host
 
+	// scheduledTestScheduler runs configured provider health checks.
+	scheduledTestScheduler *scheduledtest.Scheduler
+
 	// managementRoutesRegistered tracks whether the management routes have been attached to the engine.
 	managementRoutesRegistered atomic.Bool
 	// managementRoutesEnabled controls whether management endpoints serve real handlers.
@@ -333,6 +337,8 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
 	s.mgmt.SetPluginHost(optionState.pluginHost)
 	s.mgmt.SetConfigReloadHook(optionState.configReloadHook)
+	s.scheduledTestScheduler = scheduledtest.NewScheduler(cfg, authManager)
+	s.mgmt.SetScheduledTestResultsProvider(s.scheduledTestScheduler.Results)
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}
@@ -345,6 +351,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		s.mgmt.SetPostAuthPersistHook(optionState.postAuthPersistHook)
 	}
 	s.localPassword = optionState.localPassword
+	s.updateScheduledTests(cfg)
 
 	// Home heartbeat gate: when home is enabled, block all endpoints with 503 until the
 	// subscribe-config heartbeat connection is healthy.
@@ -712,6 +719,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)
 		mgmt.DELETE("/openai-compatibility", s.mgmt.DeleteOpenAICompat)
+		mgmt.GET("/openai-compatibility/scheduled-test-results", s.mgmt.GetOpenAICompatScheduledTestResults)
 
 		mgmt.GET("/vertex-api-key", s.mgmt.GetVertexCompatKeys)
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)
@@ -1492,6 +1500,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		default:
 		}
 	}
+	if s.scheduledTestScheduler != nil {
+		s.scheduledTestScheduler.Stop()
+	}
 
 	if s.muxHTTPListener != nil {
 		_ = s.muxHTTPListener.Close()
@@ -1539,6 +1550,22 @@ func (s *Server) applyAccessConfig(oldCfg, newCfg *config.Config) {
 	if _, err := access.ApplyAccessProviders(s.accessManager, oldCfg, newCfg); err != nil {
 		return
 	}
+}
+
+func (s *Server) updateScheduledTests(cfg *config.Config) {
+	if s == nil || s.scheduledTestScheduler == nil {
+		return
+	}
+	var manager *auth.Manager
+	if s.handlers != nil {
+		manager = s.handlers.AuthManager
+	}
+	s.scheduledTestScheduler.Update(cfg, manager)
+	if !scheduledtest.ConfigHasEnabled(cfg) {
+		s.scheduledTestScheduler.Stop()
+		return
+	}
+	s.scheduledTestScheduler.Start(context.Background())
 }
 
 // UpdateClients updates the server's client list and configuration.
@@ -1668,6 +1695,7 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		s.mgmt.SetPluginHost(s.pluginHost)
 	}
 	s.refreshPluginManagementRoutes()
+	s.updateScheduledTests(cfg)
 
 	// Count client sources from configuration and auth store.
 	authEntries := 0

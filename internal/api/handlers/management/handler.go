@@ -18,6 +18,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginstore"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/scheduledtest"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -57,6 +58,7 @@ type Handler struct {
 	pluginStoreHTTPClient  pluginstore.HTTPDoer
 	pluginReleaseCacheMu   sync.Mutex
 	pluginReleaseCache     map[string]pluginReleaseCacheEntry
+	scheduledTestResults func() map[string][]scheduledtest.Result
 }
 
 // NewHandler creates a new management handler instance.
@@ -211,6 +213,11 @@ func (h *Handler) SetPostAuthHook(hook coreauth.PostAuthHook) {
 // SetPostAuthPersistHook registers a hook to be called after auth persistence.
 func (h *Handler) SetPostAuthPersistHook(hook coreauth.PostAuthHook) {
 	h.postAuthPersistHook = hook
+}
+
+// SetScheduledTestResultsProvider registers a provider for scheduled test results.
+func (h *Handler) SetScheduledTestResultsProvider(provider func() map[string][]scheduledtest.Result) {
+	h.scheduledTestResults = provider
 }
 
 // Middleware enforces access control for management endpoints.

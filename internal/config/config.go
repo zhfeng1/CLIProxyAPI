@@ -604,6 +604,9 @@ type OpenAICompatibility struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// ScheduledTest configures periodic provider health checks.
+	ScheduledTest *ProviderScheduledTest `yaml:"scheduled-test,omitempty" json:"scheduled-test,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
@@ -613,6 +616,21 @@ type OpenAICompatibilityAPIKey struct {
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
 	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+}
+
+// ProviderScheduledTest configures periodic provider health checks.
+type ProviderScheduledTest struct {
+	// Enabled controls whether this scheduled test is active.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Model is the client-visible model ID to test.
+	Model string `yaml:"model" json:"model"`
+
+	// Cron is a standard five-field cron expression: minute hour day month weekday.
+	Cron string `yaml:"cron" json:"cron"`
+
+	// MaxResults controls how many recent in-memory test results are retained.
+	MaxResults int `yaml:"max-results,omitempty" json:"max-results,omitempty"`
 }
 
 // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,
@@ -933,6 +951,9 @@ func (cfg *Config) SanitizeOpenAICompatibility() {
 		e.Prefix = normalizeModelPrefix(e.Prefix)
 		e.BaseURL = strings.TrimSpace(e.BaseURL)
 		e.Headers = NormalizeHeaders(e.Headers)
+		if e.ScheduledTest != nil {
+			normalizeProviderScheduledTest(e.ScheduledTest)
+		}
 		if e.BaseURL == "" {
 			// Skip providers with no base-url; treated as removed
 			continue
@@ -940,6 +961,17 @@ func (cfg *Config) SanitizeOpenAICompatibility() {
 		out = append(out, e)
 	}
 	cfg.OpenAICompatibility = out
+}
+
+func normalizeProviderScheduledTest(entry *ProviderScheduledTest) {
+	if entry == nil {
+		return
+	}
+	entry.Model = strings.TrimSpace(entry.Model)
+	entry.Cron = strings.Join(strings.Fields(entry.Cron), " ")
+	if entry.MaxResults < 0 {
+		entry.MaxResults = 0
+	}
 }
 
 // SanitizeCodexKeys removes Codex API key entries missing a BaseURL.
