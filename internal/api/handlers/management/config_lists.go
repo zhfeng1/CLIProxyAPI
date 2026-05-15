@@ -298,6 +298,10 @@ func (h *Handler) PutClaudeKeys(c *gin.Context) {
 		arr = obj.Items
 	}
 	for i := range arr {
+		if err := validateProviderScheduledTest(arr[i].ScheduledTest); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		normalizeClaudeKey(&arr[i])
 	}
 	h.mu.Lock()
@@ -308,13 +312,14 @@ func (h *Handler) PutClaudeKeys(c *gin.Context) {
 }
 func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	type claudeKeyPatch struct {
-		APIKey         *string               `json:"api-key"`
-		Prefix         *string               `json:"prefix"`
-		BaseURL        *string               `json:"base-url"`
-		ProxyURL       *string               `json:"proxy-url"`
-		Models         *[]config.ClaudeModel `json:"models"`
-		Headers        *map[string]string    `json:"headers"`
-		ExcludedModels *[]string             `json:"excluded-models"`
+		APIKey         *string                       `json:"api-key"`
+		Prefix         *string                       `json:"prefix"`
+		BaseURL        *string                       `json:"base-url"`
+		ProxyURL       *string                       `json:"proxy-url"`
+		Models         *[]config.ClaudeModel         `json:"models"`
+		Headers        *map[string]string            `json:"headers"`
+		ExcludedModels *[]string                     `json:"excluded-models"`
+		ScheduledTest  *config.ProviderScheduledTest `json:"scheduled-test"`
 	}
 	var body struct {
 		Index *int            `json:"index"`
@@ -367,6 +372,13 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	}
 	if body.Value.ExcludedModels != nil {
 		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
+	}
+	if body.Value.ScheduledTest != nil {
+		if err := validateProviderScheduledTest(body.Value.ScheduledTest); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		entry.ScheduledTest = body.Value.ScheduledTest
 	}
 	normalizeClaudeKey(&entry)
 	h.cfg.ClaudeKey[targetIndex] = entry
@@ -549,6 +561,14 @@ func (h *Handler) PatchOpenAICompat(c *gin.Context) {
 }
 
 func (h *Handler) GetOpenAICompatScheduledTestResults(c *gin.Context) {
+	h.getScheduledTestResults(c)
+}
+
+func (h *Handler) GetClaudeScheduledTestResults(c *gin.Context) {
+	h.getScheduledTestResults(c)
+}
+
+func (h *Handler) getScheduledTestResults(c *gin.Context) {
 	results := map[string][]scheduledtest.Result{}
 	if h.scheduledTestResults != nil {
 		results = h.scheduledTestResults()
@@ -1176,6 +1196,13 @@ func normalizeClaudeKey(entry *config.ClaudeKey) {
 	entry.ProxyURL = strings.TrimSpace(entry.ProxyURL)
 	entry.Headers = config.NormalizeHeaders(entry.Headers)
 	entry.ExcludedModels = config.NormalizeExcludedModels(entry.ExcludedModels)
+	if entry.ScheduledTest != nil {
+		entry.ScheduledTest.Model = strings.TrimSpace(entry.ScheduledTest.Model)
+		entry.ScheduledTest.Cron = strings.Join(strings.Fields(entry.ScheduledTest.Cron), " ")
+		if entry.ScheduledTest.MaxResults < 0 {
+			entry.ScheduledTest.MaxResults = 0
+		}
+	}
 	if len(entry.Models) == 0 {
 		return
 	}

@@ -452,6 +452,9 @@ type ClaudeKey struct {
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 
+	// ScheduledTest configures periodic provider health checks.
+	ScheduledTest *ProviderScheduledTest `yaml:"scheduled-test,omitempty" json:"scheduled-test,omitempty"`
+
 	// Cloak configures request cloaking for non-Claude-Code clients.
 	Cloak *CloakConfig `yaml:"cloak,omitempty" json:"cloak,omitempty"`
 
@@ -1005,6 +1008,9 @@ func (cfg *Config) SanitizeClaudeKeys() {
 		entry.Prefix = normalizeModelPrefix(entry.Prefix)
 		entry.Headers = NormalizeHeaders(entry.Headers)
 		entry.ExcludedModels = NormalizeExcludedModels(entry.ExcludedModels)
+		if entry.ScheduledTest != nil {
+			normalizeProviderScheduledTest(entry.ScheduledTest)
+		}
 	}
 }
 

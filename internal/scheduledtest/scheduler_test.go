@@ -73,3 +73,50 @@ func TestBuildTasks_DefaultsModelAndSkipsInvalidCron(t *testing.T) {
 		t.Fatalf("default model = %q, want %q", tasks[0].model, "alias")
 	}
 }
+
+func TestBuildTasks_ClaudeKeyPinsConfiguredCredential(t *testing.T) {
+	cfg := &config.Config{
+		ClaudeKey: []config.ClaudeKey{
+			{
+				APIKey:  "first-key",
+				BaseURL: "https://api.anthropic.com",
+			},
+			{
+				APIKey: "second-key",
+				Models: []config.ClaudeModel{{Name: "claude-3-5-sonnet-20241022", Alias: "claude-sonnet-latest"}},
+				ScheduledTest: &config.ProviderScheduledTest{
+					Enabled:    true,
+					Cron:       "*/10 * * * *",
+					MaxResults: 3,
+				},
+			},
+		},
+	}
+
+	tasks := buildTasks(cfg)
+	if len(tasks) != 1 {
+		t.Fatalf("tasks length = %d, want 1", len(tasks))
+	}
+	task := tasks[0]
+	if task.provider != "claude" {
+		t.Fatalf("provider = %q, want claude", task.provider)
+	}
+	if task.source != "claude" {
+		t.Fatalf("source = %q, want claude", task.source)
+	}
+	if task.requestPath != "/v1/messages" {
+		t.Fatalf("requestPath = %q, want /v1/messages", task.requestPath)
+	}
+	if task.model != "claude-sonnet-latest" {
+		t.Fatalf("model = %q, want claude-sonnet-latest", task.model)
+	}
+	if task.pinnedAuthID == "" {
+		t.Fatalf("pinnedAuthID is empty")
+	}
+	if task.pinnedAuthID != "claude:apikey:0aa0e52f9ba8" {
+		t.Fatalf("pinnedAuthID = %q, want stable second key ID", task.pinnedAuthID)
+	}
+	if task.maxResults != 3 {
+		t.Fatalf("maxResults = %d, want 3", task.maxResults)
+	}
+}

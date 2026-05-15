@@ -240,6 +240,11 @@ nonstream-keepalive-interval: 0
 #     prefix: "test" # optional: require calls like "test/claude-sonnet-latest" to target this credential
 #     disable-cooling: false # optional: per-auth override for auth/model cooldown scheduling
 #     base-url: "https://www.example.com" # use the custom claude API endpoint
+#     scheduled-test: # optional: periodically test this credential with a Claude messages ping
+#       enabled: false
+#       model: "claude-sonnet-latest" # client-visible model ID to test; defaults to the first configured model when omitted
+#       cron: "*/30 * * * *" # standard 5-field cron: minute hour day month weekday
+#       max-results: 20 # number of recent in-memory results retained for management APIs
 #     headers:
 #       X-Custom-Header: "custom-value"
 #     proxy-url: "socks5://proxy.example.com:1080" # optional: per-key proxy override

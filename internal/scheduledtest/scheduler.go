@@ -2,6 +2,8 @@ package scheduledtest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,13 +20,16 @@ import (
 const defaultMaxResults = 20
 
 type task struct {
-	key         string
-	provider    string
-	displayName string
-	model       string
-	cron        string
-	spec        CronSpec
-	maxResults  int
+	key          string
+	provider     string
+	displayName  string
+	model        string
+	cron         string
+	source       string
+	requestPath  string
+	pinnedAuthID string
+	spec         CronSpec
+	maxResults   int
 }
 
 // Result captures one scheduled provider test result.
@@ -77,6 +82,12 @@ func ConfigHasEnabled(cfg *config.Config) bool {
 			continue
 		}
 		return true
+	}
+	for i := range cfg.ClaudeKey {
+		entry := cfg.ClaudeKey[i]
+		if entry.ScheduledTest != nil && entry.ScheduledTest.Enabled {
+			return true
+		}
 	}
 	return false
 }
@@ -219,7 +230,10 @@ func (s *Scheduler) runTask(task task, manager *coreauth.Manager) {
 	started := time.Now()
 	metadata := map[string]any{
 		coreexecutor.RequestedModelMetadataKey: task.model,
-		coreexecutor.RequestPathMetadataKey:    "/v1/chat/completions",
+		coreexecutor.RequestPathMetadataKey:    task.requestPath,
+	}
+	if task.pinnedAuthID != "" {
+		metadata[coreexecutor.PinnedAuthMetadataKey] = task.pinnedAuthID
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"model": task.model,
@@ -235,7 +249,7 @@ func (s *Scheduler) runTask(task task, manager *coreauth.Manager) {
 		Payload: payload,
 	}, coreexecutor.Options{
 		OriginalRequest: payload,
-		SourceFormat:    sdktranslator.FromString("openai"),
+		SourceFormat:    sdktranslator.FromString(task.source),
 		Metadata:        metadata,
 	})
 
@@ -252,6 +266,8 @@ func (s *Scheduler) runTask(task task, manager *coreauth.Manager) {
 	}
 	if authID, _ := metadata[coreexecutor.SelectedAuthMetadataKey].(string); strings.TrimSpace(authID) != "" {
 		result.AuthID = strings.TrimSpace(authID)
+	} else if task.pinnedAuthID != "" {
+		result.AuthID = task.pinnedAuthID
 	}
 	if err != nil {
 		result.Error = truncateError(err.Error())
@@ -301,6 +317,7 @@ func buildTasks(cfg *config.Config) []task {
 		return nil
 	}
 	tasks := make([]task, 0, len(cfg.OpenAICompatibility))
+	tasks = append(tasks, buildClaudeTasks(cfg)...)
 	for i := range cfg.OpenAICompatibility {
 		entry := cfg.OpenAICompatibility[i]
 		if entry.Disabled || entry.ScheduledTest == nil || !entry.ScheduledTest.Enabled {
@@ -338,8 +355,61 @@ func buildTasks(cfg *config.Config) []task {
 			displayName: displayName,
 			model:       model,
 			cron:        cronExpr,
+			source:      "openai",
+			requestPath: "/v1/chat/completions",
 			spec:        spec,
 			maxResults:  entry.ScheduledTest.MaxResults,
+		})
+	}
+	return tasks
+}
+
+func buildClaudeTasks(cfg *config.Config) []task {
+	if cfg == nil || len(cfg.ClaudeKey) == 0 {
+		return nil
+	}
+	tasks := make([]task, 0, len(cfg.ClaudeKey))
+	counters := make(map[string]int)
+	for i := range cfg.ClaudeKey {
+		entry := cfg.ClaudeKey[i]
+		apiKey := strings.TrimSpace(entry.APIKey)
+		if apiKey == "" {
+			continue
+		}
+		authID := nextStableAuthID(counters, "claude:apikey", apiKey, entry.BaseURL)
+		if entry.ScheduledTest == nil || !entry.ScheduledTest.Enabled {
+			continue
+		}
+		displayName := fmt.Sprintf("claude-api-key[%d]", i+1)
+		model := strings.TrimSpace(entry.ScheduledTest.Model)
+		if model == "" {
+			model = firstClaudeModel(entry.Models, entry.Prefix, cfg.ForceModelPrefix)
+		}
+		if model == "" {
+			log.WithField("provider", displayName).Warn("scheduled provider test skipped: model is empty")
+			continue
+		}
+		cronExpr := strings.Join(strings.Fields(entry.ScheduledTest.Cron), " ")
+		spec, err := ParseCron(cronExpr)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"provider": displayName,
+				"cron":     cronExpr,
+				"error":    err,
+			}).Warn("scheduled provider test skipped: invalid cron")
+			continue
+		}
+		tasks = append(tasks, task{
+			key:          fmt.Sprintf("claude:%d:%s", i, authID),
+			provider:     "claude",
+			displayName:  displayName,
+			model:        model,
+			cron:         cronExpr,
+			source:       "claude",
+			requestPath:  "/v1/messages",
+			pinnedAuthID: authID,
+			spec:         spec,
+			maxResults:   entry.ScheduledTest.MaxResults,
 		})
 	}
 	return tasks
@@ -355,6 +425,45 @@ func firstOpenAICompatModel(models []config.OpenAICompatibilityModel) string {
 		}
 	}
 	return ""
+}
+
+func firstClaudeModel(models []config.ClaudeModel, prefix string, forcePrefix bool) string {
+	for _, model := range models {
+		candidate := strings.TrimSpace(model.Alias)
+		if candidate == "" {
+			candidate = strings.TrimSpace(model.Name)
+		}
+		if candidate == "" {
+			continue
+		}
+		prefix = strings.TrimSpace(prefix)
+		if forcePrefix && prefix != "" && !strings.HasPrefix(candidate, prefix+"/") {
+			return prefix + "/" + candidate
+		}
+		return candidate
+	}
+	return ""
+}
+
+func nextStableAuthID(counters map[string]int, kind string, parts ...string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(kind))
+	for _, part := range parts {
+		hasher.Write([]byte{0})
+		hasher.Write([]byte(strings.TrimSpace(part)))
+	}
+	digest := hex.EncodeToString(hasher.Sum(nil))
+	if len(digest) < 12 {
+		digest = fmt.Sprintf("%012s", digest)
+	}
+	short := digest[:12]
+	key := kind + ":" + short
+	index := counters[key]
+	counters[key] = index + 1
+	if index > 0 {
+		short = fmt.Sprintf("%s-%d", short, index)
+	}
+	return fmt.Sprintf("%s:%s", kind, short)
 }
 
 func truncateError(message string) string {
