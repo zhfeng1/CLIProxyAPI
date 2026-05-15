@@ -230,11 +230,11 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
 	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
-	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	body, _, err = helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
 	if err != nil {
 		return resp, err
 	}
-	body, _, err = helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
+	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return resp, err
 	}
@@ -425,11 +425,11 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
 	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
-	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	body, _, err = helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
 	if err != nil {
 		return nil, err
 	}
-	body, _, err = helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
+	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -694,11 +694,11 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	if !strings.HasPrefix(baseModel, "claude-3-5-haiku") {
 		body = checkSystemInstructions(body)
 	}
-	body, _, err := helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	body, _, err := helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
 	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}
-	body, _, err = helps.EnsureDeepSeekClaudeToolResults(baseModel, baseURL, body)
+	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}

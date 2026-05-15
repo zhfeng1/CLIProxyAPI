@@ -31,7 +31,7 @@ func TestEnsureDeepSeekClaudeThinkingContent_FillsMissingThinkingField(t *testin
 	}
 }
 
-func TestEnsureDeepSeekClaudeThinkingContent_DoesNotInsertThinkingBlockForToolUse(t *testing.T) {
+func TestEnsureDeepSeekClaudeThinkingContent_InsertsThinkingBlockForToolUse(t *testing.T) {
 	body := []byte(`{
 		"model":"deepseek-chat",
 		"thinking":{"type":"enabled","budget_tokens":2048},
@@ -47,14 +47,112 @@ func TestEnsureDeepSeekClaudeThinkingContent_DoesNotInsertThinkingBlockForToolUs
 	if err != nil {
 		t.Fatalf("EnsureDeepSeekClaudeThinkingContent() error = %v", err)
 	}
-	if patched != 0 {
-		t.Fatalf("patched = %d, want %d", patched, 0)
+	if patched != 1 {
+		t.Fatalf("patched = %d, want %d", patched, 1)
 	}
-	if got := gjson.GetBytes(out, "messages.0.content.0.type").String(); got != "text" {
-		t.Fatalf("messages.0.content.0.type = %q, want %q", got, "text")
+	if got := gjson.GetBytes(out, "messages.0.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.0.content.0.type = %q, want %q", got, "thinking")
 	}
-	if got := gjson.GetBytes(out, "messages.0.content.1.type").String(); got != "tool_use" {
-		t.Fatalf("messages.0.content.1.type = %q, want %q", got, "tool_use")
+	if got := gjson.GetBytes(out, "messages.0.content.0.thinking"); !got.Exists() || got.String() != "" {
+		t.Fatalf("messages.0.content.0.thinking = %q, exists=%v; want empty string", got.String(), got.Exists())
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.1.type").String(); got != "text" {
+		t.Fatalf("messages.0.content.1.type = %q, want %q", got, "text")
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.2.type").String(); got != "tool_use" {
+		t.Fatalf("messages.0.content.2.type = %q, want %q", got, "tool_use")
+	}
+}
+
+func TestEnsureDeepSeekClaudeRepairsResponsesToolHistory(t *testing.T) {
+	body := []byte(`{
+		"model":"deepseek-chat",
+		"thinking":{"type":"enabled","budget_tokens":2048},
+		"messages":[
+			{"role":"assistant","content":"checking"},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"fc_call_00","name":"Read","input":{"file_path":"a.go"}}
+			]},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"fc_call_01","name":"Bash","input":{"command":"pwd"}}
+			]},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"fc_call_02","name":"Bash","input":{"command":"ls"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"fc_call_00","content":"read output"}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"fc_call_01","content":"pwd output"}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"fc_call_02","content":"ls output"}
+			]}
+		]
+	}`)
+
+	out, patched, err := EnsureDeepSeekClaudeToolResults("deepseek-chat", "", body)
+	if err != nil {
+		t.Fatalf("EnsureDeepSeekClaudeToolResults() error = %v", err)
+	}
+	if patched != 5 {
+		t.Fatalf("tool results patched = %d, want %d", patched, 5)
+	}
+	out, thinkingPatched, err := EnsureDeepSeekClaudeThinkingContent("deepseek-chat", "", out)
+	if err != nil {
+		t.Fatalf("EnsureDeepSeekClaudeThinkingContent() error = %v", err)
+	}
+	if thinkingPatched != 1 {
+		t.Fatalf("thinking patched = %d, want %d", thinkingPatched, 1)
+	}
+	if got := len(gjson.GetBytes(out, "messages").Array()); got != 2 {
+		t.Fatalf("messages length = %d, want %d", got, 2)
+	}
+	if got := gjson.GetBytes(out, "messages.0.role").String(); got != "assistant" {
+		t.Fatalf("messages.0.role = %q, want %q", got, "assistant")
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.0.content.0.type = %q, want %q", got, "thinking")
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.1.text").String(); got != "checking" {
+		t.Fatalf("messages.0.content.1.text = %q, want %q", got, "checking")
+	}
+	for idx, id := range []string{"fc_call_00", "fc_call_01", "fc_call_02"} {
+		path := "messages.0.content." + string(rune('2'+idx)) + ".id"
+		if got := gjson.GetBytes(out, path).String(); got != id {
+			t.Fatalf("%s = %q, want %q", path, got, id)
+		}
+		resultPath := "messages.1.content." + string(rune('0'+idx)) + ".tool_use_id"
+		if got := gjson.GetBytes(out, resultPath).String(); got != id {
+			t.Fatalf("%s = %q, want %q", resultPath, got, id)
+		}
+	}
+}
+
+func TestEnsureDeepSeekClaudeThinkingContent_PreservesTextBeforeToolUseAfterInsertion(t *testing.T) {
+	body := []byte(`{
+		"model":"deepseek-chat",
+		"thinking":{"type":"enabled","budget_tokens":2048},
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"text","text":"I'll check."},
+				{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"pwd"}}
+			]}
+		]
+	}`)
+
+	out, patched, err := EnsureDeepSeekClaudeThinkingContent("deepseek-chat", "", body)
+	if err != nil {
+		t.Fatalf("EnsureDeepSeekClaudeThinkingContent() error = %v", err)
+	}
+	if patched != 1 {
+		t.Fatalf("patched = %d, want %d", patched, 1)
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.1.type").String(); got != "text" {
+		t.Fatalf("messages.0.content.1.type = %q, want %q", got, "text")
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.2.type").String(); got != "tool_use" {
+		t.Fatalf("messages.0.content.2.type = %q, want %q", got, "tool_use")
 	}
 }
 
