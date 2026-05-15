@@ -18,6 +18,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: ghcr-image-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docker:
     runs-on: ubuntu-latest
