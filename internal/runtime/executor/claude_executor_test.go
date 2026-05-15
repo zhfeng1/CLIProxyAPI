@@ -1050,6 +1050,87 @@ func TestClaudeExecutor_ExecuteDeepSeekRepairsResponsesToolHistory(t *testing.T)
 	}
 }
 
+func TestClaudeExecutor_ExecuteMiMoRepairsResponsesThinkingHistory(t *testing.T) {
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var errRead error
+		captured, errRead = io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Errorf("read request body: %v", errRead)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`event: message_start`,
+			`data: {"type":"message_start","message":{"id":"msg_1","model":"xiaomi/mimo-v2.5-pro"}}`,
+			`event: content_block_delta`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`event: message_delta`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}`,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	executor := NewClaudeExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"api_key":  "key-123",
+		"base_url": server.URL,
+	}}
+
+	payload := []byte(`{
+		"model":"xiaomi/mimo-v2.5-pro(high)",
+		"reasoning":{"effort":"xhigh","summary":"auto"},
+		"input":[
+			{"role":"user","content":[{"type":"input_text","text":"inspect files"}]},
+			{"role":"assistant","content":[{"type":"output_text","text":"checking"}]},
+			{"type":"function_call","call_id":"fc_call_01","name":"Bash","arguments":"{\"command\":\"pwd\"}"},
+			{"type":"function_call","call_id":"fc_call_02","name":"Bash","arguments":"{\"command\":\"ls\"}"},
+			{"type":"function_call_output","call_id":"fc_call_02","output":"ls output"},
+			{"type":"function_call_output","call_id":"fc_call_01","output":"pwd output"}
+		]
+	}`)
+
+	if _, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "xiaomi/mimo-v2.5-pro(high)",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+	}); err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	if len(captured) == 0 {
+		t.Fatal("expected upstream request body to be captured")
+	}
+	if got := len(gjson.GetBytes(captured, "messages").Array()); got != 3 {
+		t.Fatalf("messages length = %d, want %d; body=%s", got, 3, string(captured))
+	}
+	if got := gjson.GetBytes(captured, "thinking.type").String(); got == "" || got == "disabled" {
+		t.Fatalf("thinking.type = %q, want enabled thinking; body=%s", got, string(captured))
+	}
+	if got := gjson.GetBytes(captured, "messages.1.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "thinking")
+	}
+	if got := gjson.GetBytes(captured, "messages.1.content.0.thinking"); !got.Exists() || got.String() != "" {
+		t.Fatalf("messages.1.content.0.thinking = %q, exists=%v; want empty string", got.String(), got.Exists())
+	}
+	if got := gjson.GetBytes(captured, "messages.1.content.1.text").String(); got != "checking" {
+		t.Fatalf("messages.1.content.1.text = %q, want %q", got, "checking")
+	}
+	for idx, id := range []string{"fc_call_01", "fc_call_02"} {
+		toolIDPath := fmt.Sprintf("messages.1.content.%d.id", idx+2)
+		if got := gjson.GetBytes(captured, toolIDPath).String(); got != id {
+			t.Fatalf("%s = %q, want %q", toolIDPath, got, id)
+		}
+		resultIDPath := fmt.Sprintf("messages.2.content.%d.tool_use_id", idx)
+		if got := gjson.GetBytes(captured, resultIDPath).String(); got != id {
+			t.Fatalf("%s = %q, want %q", resultIDPath, got, id)
+		}
+	}
+}
+
 func TestClaudeExecutor_ReusesUserIDAcrossModelsWhenCacheEnabled(t *testing.T) {
 	var userIDs []string
 	var requestModels []string

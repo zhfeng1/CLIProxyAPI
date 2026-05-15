@@ -234,7 +234,15 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if err != nil {
 		return resp, err
 	}
+	body, _, err = helps.EnsureMiMoClaudeToolResults(baseModel, baseURL, body)
+	if err != nil {
+		return resp, err
+	}
 	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return resp, err
+	}
+	body, _, err = helps.EnsureMiMoClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return resp, err
 	}
@@ -429,7 +437,15 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	if err != nil {
 		return nil, err
 	}
+	body, _, err = helps.EnsureMiMoClaudeToolResults(baseModel, baseURL, body)
+	if err != nil {
+		return nil, err
+	}
 	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return nil, err
+	}
+	body, _, err = helps.EnsureMiMoClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -698,7 +714,15 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}
+	body, _, err = helps.EnsureMiMoClaudeToolResults(baseModel, baseURL, body)
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
 	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
+	body, _, err = helps.EnsureMiMoClaudeThinkingContent(baseModel, baseURL, body)
 	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}

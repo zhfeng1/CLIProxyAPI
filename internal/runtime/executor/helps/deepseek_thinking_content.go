@@ -98,7 +98,10 @@ func EnsureDeepSeekClaudeToolResults(model string, baseURL string, body []byte) 
 	if !isDeepSeekTarget(model, gjson.GetBytes(body, "model").String(), baseURL) {
 		return body, 0, nil
 	}
+	return ensureClaudeToolResults(body, "deepseek")
+}
 
+func ensureClaudeToolResults(body []byte, providerName string) ([]byte, int, error) {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.Exists() || !messages.IsArray() {
 		return body, 0, nil
@@ -180,7 +183,7 @@ func EnsureDeepSeekClaudeToolResults(model string, baseURL string, body []byte) 
 	messagesRaw := joinJSONArray(outMessages)
 	out, err := sjson.SetRawBytes(body, "messages", messagesRaw)
 	if err != nil {
-		return body, patched, fmt.Errorf("deepseek tool_result patch failed: %w", err)
+		return body, patched, fmt.Errorf("%s tool_result patch failed: %w", providerName, err)
 	}
 	return out, patched, nil
 }
