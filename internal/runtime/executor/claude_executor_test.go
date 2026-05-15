@@ -857,6 +857,62 @@ func TestApplyClaudeToolPrefix_NestedToolReference(t *testing.T) {
 	}
 }
 
+func TestClaudeExecutor_ExecuteDeepSeekFillsMissingThinkingContent(t *testing.T) {
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var errRead error
+		captured, errRead = io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Errorf("read request body: %v", errRead)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","model":"deepseek-chat","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	executor := NewClaudeExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"api_key":  "key-123",
+		"base_url": server.URL,
+	}}
+
+	payload := []byte(`{
+		"model":"deepseek-chat",
+		"thinking":{"type":"enabled","budget_tokens":2048},
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"pwd"}}
+			]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}
+			]}
+		]
+	}`)
+
+	if _, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek-chat",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("claude"),
+	}); err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	if len(captured) == 0 {
+		t.Fatal("expected upstream request body to be captured")
+	}
+	if got := gjson.GetBytes(captured, "messages.0.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.0.content.0.type = %q, want %q", got, "thinking")
+	}
+	gotThinking := gjson.GetBytes(captured, "messages.0.content.0.thinking")
+	if !gotThinking.Exists() || gotThinking.String() != "" {
+		t.Fatalf("messages.0.content.0.thinking = %q, exists=%v; want empty string", gotThinking.String(), gotThinking.Exists())
+	}
+	if got := gjson.GetBytes(captured, "messages.0.content.1.type").String(); got != "tool_use" {
+		t.Fatalf("messages.0.content.1.type = %q, want %q", got, "tool_use")
+	}
+}
+
 func TestClaudeExecutor_ReusesUserIDAcrossModelsWhenCacheEnabled(t *testing.T) {
 	var userIDs []string
 	var requestModels []string

@@ -230,6 +230,10 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
 	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
+	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return resp, err
+	}
 	body = ensureModelMaxTokens(body, baseModel)
 
 	// Disable thinking if tool_choice forces tool use (Anthropic API constraint)
@@ -417,6 +421,10 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
 	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
+	body, _, err = helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return nil, err
+	}
 	body = ensureModelMaxTokens(body, baseModel)
 
 	// Disable thinking if tool_choice forces tool use (Anthropic API constraint)
@@ -677,6 +685,10 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 
 	if !strings.HasPrefix(baseModel, "claude-3-5-haiku") {
 		body = checkSystemInstructions(body)
+	}
+	body, _, err := helps.EnsureDeepSeekClaudeThinkingContent(baseModel, baseURL, body)
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
 	}
 
 	// Keep count_tokens requests compatible with Anthropic cache-control constraints too.
