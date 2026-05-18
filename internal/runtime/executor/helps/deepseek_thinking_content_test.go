@@ -64,6 +64,41 @@ func TestEnsureDeepSeekClaudeThinkingContent_InsertsThinkingBlockForToolUse(t *t
 	}
 }
 
+func TestEnsureDeepSeekClaudeThinkingContent_ImplicitThinkingModelBackfillsAssistants(t *testing.T) {
+	body := []byte(`{
+		"model":"deepseek/deepseek-v4-pro",
+		"messages":[
+			{"role":"assistant","content":"checking"},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"pwd"}}
+			]}
+		]
+	}`)
+
+	out, patched, err := EnsureDeepSeekClaudeThinkingContent("deepseek/deepseek-v4-pro", "", body)
+	if err != nil {
+		t.Fatalf("EnsureDeepSeekClaudeThinkingContent() error = %v", err)
+	}
+	if patched != 2 {
+		t.Fatalf("patched = %d, want %d", patched, 2)
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.0.content.0.type = %q, want %q", got, "thinking")
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.0.thinking"); !got.Exists() || got.String() != "" {
+		t.Fatalf("messages.0.content.0.thinking = %q, exists=%v; want empty string", got.String(), got.Exists())
+	}
+	if got := gjson.GetBytes(out, "messages.0.content.1.text").String(); got != "checking" {
+		t.Fatalf("messages.0.content.1.text = %q, want %q", got, "checking")
+	}
+	if got := gjson.GetBytes(out, "messages.1.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.1.content.0.type = %q, want %q", got, "thinking")
+	}
+	if got := gjson.GetBytes(out, "messages.1.content.1.type").String(); got != "tool_use" {
+		t.Fatalf("messages.1.content.1.type = %q, want %q", got, "tool_use")
+	}
+}
+
 func TestEnsureDeepSeekClaudeRepairsResponsesToolHistory(t *testing.T) {
 	body := []byte(`{
 		"model":"deepseek-chat",

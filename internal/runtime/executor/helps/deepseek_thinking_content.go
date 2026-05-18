@@ -18,7 +18,7 @@ func EnsureDeepSeekClaudeThinkingContent(model string, baseURL string, body []by
 	if !isDeepSeekTarget(model, gjson.GetBytes(body, "model").String(), baseURL) {
 		return body, 0, nil
 	}
-	if !isThinkingModeEnabled(body) {
+	if !isDeepSeekThinkingMode(model, gjson.GetBytes(body, "model").String(), body) {
 		return body, 0, nil
 	}
 
@@ -35,18 +35,30 @@ func EnsureDeepSeekClaudeThinkingContent(model string, baseURL string, body []by
 		}
 
 		content := msg.Get("content")
-		if !content.Exists() || !content.IsArray() {
+		if !content.Exists() {
+			continue
+		}
+		if content.Type == gjson.String {
+			nextContent := []byte(`[{"type":"thinking","thinking":""},{"type":"text","text":""}]`)
+			nextContent, _ = sjson.SetBytes(nextContent, "1.text", content.String())
+			path := fmt.Sprintf("messages.%d.content", msgIdx)
+			next, err := sjson.SetRawBytes(out, path, nextContent)
+			if err != nil {
+				return body, patched, fmt.Errorf("deepseek string thinking content conversion failed: %w", err)
+			}
+			out = next
+			patched++
+			continue
+		}
+		if !content.IsArray() {
 			continue
 		}
 
 		hasThinking := false
-		hasToolUse := false
 		for blockIdx, block := range content.Array() {
 			switch strings.TrimSpace(block.Get("type").String()) {
 			case "thinking":
 				hasThinking = true
-			case "tool_use":
-				hasToolUse = true
 			default:
 				continue
 			}
@@ -65,7 +77,7 @@ func EnsureDeepSeekClaudeThinkingContent(model string, baseURL string, body []by
 			out = next
 			patched++
 		}
-		if hasThinking || !hasToolUse {
+		if hasThinking {
 			continue
 		}
 
@@ -194,6 +206,26 @@ func isDeepSeekTarget(model string, payloadModel string, baseURL string) bool {
 
 func isDeepSeekName(value string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(value)), "deepseek")
+}
+
+func isDeepSeekThinkingMode(model string, payloadModel string, body []byte) bool {
+	thinkingType := strings.TrimSpace(gjson.GetBytes(body, "thinking.type").String())
+	if strings.EqualFold(thinkingType, "disabled") {
+		return false
+	}
+	if thinkingType != "" {
+		return true
+	}
+	return isDeepSeekImplicitThinkingModel(model) || isDeepSeekImplicitThinkingModel(payloadModel)
+}
+
+func isDeepSeekImplicitThinkingModel(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(value, "deepseek-v4-pro") ||
+		strings.Contains(value, "deepseek-reasoner") ||
+		strings.Contains(value, "deepseek-r1") ||
+		strings.Contains(value, "deepseek-r2") ||
+		strings.Contains(value, "thinking")
 }
 
 func isThinkingModeEnabled(body []byte) bool {

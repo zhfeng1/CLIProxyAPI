@@ -1207,6 +1207,87 @@ func TestClaudeExecutor_ExecuteStreamNormalizesResponsesCustomTools(t *testing.T
 	}
 }
 
+func TestClaudeExecutor_ExecuteStreamDeepSeekImplicitThinkingBackfillsResponsesHistory(t *testing.T) {
+	var captured []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var errRead error
+		captured, errRead = io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Errorf("read request body: %v", errRead)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`event: message_start`,
+			`data: {"type":"message_start","message":{"id":"msg_1","model":"deepseek/deepseek-v4-pro"}}`,
+			`event: content_block_delta`,
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`event: message_delta`,
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}`,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	executor := NewClaudeExecutor(&config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"api_key":  "key-123",
+		"base_url": server.URL,
+	}}
+
+	payload := []byte(`{
+		"model":"deepseek/deepseek-v4-pro",
+		"input":[
+			{"role":"system","content":"You are opencode."},
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":[{"type":"output_text","text":"Hello"}]},
+			{"role":"user","content":"analyze project"},
+			{"type":"function_call","call_id":"call_00","name":"task","arguments":"{\"description\":\"analyze\",\"prompt\":\"analyze project\",\"subagent_type\":\"explore\"}"},
+			{"type":"function_call_output","call_id":"call_00","output":"done"}
+		],
+		"tools":[{"type":"function","name":"task","description":"Run task","parameters":{"type":"object","properties":{}}}],
+		"stream":true,
+		"include":["reasoning.encrypted_content"],
+		"tool_choice":"auto"
+	}`)
+
+	result, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "deepseek/deepseek-v4-pro",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream() error: %v", err)
+	}
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error: %v", chunk.Err)
+		}
+	}
+
+	if len(captured) == 0 {
+		t.Fatal("expected upstream request body to be captured")
+	}
+	if got := gjson.GetBytes(captured, "messages.2.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.2.content.0.type = %q, want %q; body=%s", got, "thinking", string(captured))
+	}
+	if got := gjson.GetBytes(captured, "messages.2.content.0.thinking"); !got.Exists() || got.String() != "" {
+		t.Fatalf("messages.2.content.0.thinking = %q, exists=%v; want empty string", got.String(), got.Exists())
+	}
+	if got := gjson.GetBytes(captured, "messages.2.content.1.text").String(); got != "Hello" {
+		t.Fatalf("messages.2.content.1.text = %q, want %q; body=%s", got, "Hello", string(captured))
+	}
+	if got := gjson.GetBytes(captured, "messages.4.content.0.type").String(); got != "thinking" {
+		t.Fatalf("messages.4.content.0.type = %q, want %q; body=%s", got, "thinking", string(captured))
+	}
+	if got := gjson.GetBytes(captured, "messages.4.content.1.type").String(); got != "tool_use" {
+		t.Fatalf("messages.4.content.1.type = %q, want %q; body=%s", got, "tool_use", string(captured))
+	}
+}
+
 func TestClaudeExecutor_ReusesUserIDAcrossModelsWhenCacheEnabled(t *testing.T) {
 	var userIDs []string
 	var requestModels []string
