@@ -14,6 +14,9 @@ services:
     #   - .env
     environment:
       DEPLOY: ${DEPLOY:-}
+      MANAGEMENT_PASSWORD: ${CPA_MANAGEMENT_KEY:-${MANAGEMENT_PASSWORD:-}}
+      CPA_USAGE_STATISTICS_ENABLED: ${CPA_USAGE_STATISTICS_ENABLED:-}
+      CPA_REDIS_USAGE_QUEUE_RETENTION_SECONDS: ${CPA_REDIS_USAGE_QUEUE_RETENTION_SECONDS:-}
     ports:
       - "8317:8317"
       - "8085:8085"
@@ -25,4 +28,40 @@ services:
       - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml
       - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
       - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+    restart: unless-stopped
+
+  cpa-usage-keeper:
+    profiles:
+      - usage-keeper
+    image: ${CPA_USAGE_KEEPER_IMAGE:-ghcr.io/willxup/cpa-usage-keeper:latest}
+    pull_policy: always
+    container_name: cpa-usage-keeper
+    depends_on:
+      - cli-proxy-api
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      CPA_BASE_URL: http://cli-proxy-api:8317
+      CPA_MANAGEMENT_KEY: ${CPA_MANAGEMENT_KEY:-${MANAGEMENT_PASSWORD:-}}
+      REDIS_QUEUE_ADDR: cli-proxy-api:8317
+      REDIS_QUEUE_TLS: ${CPA_USAGE_KEEPER_REDIS_QUEUE_TLS:-false}
+      REDIS_QUEUE_BATCH_SIZE: ${CPA_USAGE_KEEPER_REDIS_QUEUE_BATCH_SIZE:-1000}
+      REDIS_QUEUE_IDLE_INTERVAL: ${CPA_USAGE_KEEPER_REDIS_QUEUE_IDLE_INTERVAL:-1s}
+      REQUEST_TIMEOUT: ${CPA_USAGE_KEEPER_REQUEST_TIMEOUT:-30s}
+      TLS_SKIP_VERIFY: ${CPA_USAGE_KEEPER_TLS_SKIP_VERIFY:-false}
+      APP_PORT: 8080
+      APP_BASE_PATH: ${CPA_USAGE_KEEPER_BASE_PATH:-}
+      AUTH_ENABLED: ${CPA_USAGE_KEEPER_AUTH_ENABLED:-false}
+      LOGIN_PASSWORD: ${CPA_USAGE_KEEPER_LOGIN_PASSWORD:-}
+      AUTH_SESSION_TTL: ${CPA_USAGE_KEEPER_AUTH_SESSION_TTL:-168h}
+      WORK_DIR: /data
+      LOG_LEVEL: ${CPA_USAGE_KEEPER_LOG_LEVEL:-info}
+      LOG_FILE_ENABLED: ${CPA_USAGE_KEEPER_LOG_FILE_ENABLED:-true}
+      LOG_RETENTION_DAYS: ${CPA_USAGE_KEEPER_LOG_RETENTION_DAYS:-7}
+      BACKUP_ENABLED: ${CPA_USAGE_KEEPER_BACKUP_ENABLED:-true}
+      BACKUP_INTERVAL: ${CPA_USAGE_KEEPER_BACKUP_INTERVAL:-24h}
+      BACKUP_RETENTION_DAYS: ${CPA_USAGE_KEEPER_BACKUP_RETENTION_DAYS:-7}
+    ports:
+      - "${CPA_USAGE_KEEPER_BIND:-127.0.0.1}:${CPA_USAGE_KEEPER_PORT:-8080}:8080"
+    volumes:
+      - ${CPA_USAGE_KEEPER_DATA_PATH:-./keeper}:/data
     restart: unless-stopped

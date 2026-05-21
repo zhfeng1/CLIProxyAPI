@@ -86,6 +86,12 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 
 独立的 CLIProxyAPI 使用量持久化与可视化服务，定期同步 CLIProxyAPI 数据，存储到 SQLite，提供聚合 API，并内置使用量分析与统计仪表盘。
 
+本仓库的 `docker-compose.yml` 已内置可选的 `usage-keeper` profile。复制 `.env.example` 为 `.env`，设置 `CPA_MANAGEMENT_KEY`，启用 `CPA_USAGE_STATISTICS_ENABLED=true`，然后执行 `docker compose --profile usage-keeper up -d`。仪表盘默认绑定在 `http://127.0.0.1:8080`，数据持久化到 `./keeper`。
+
+### [CLIProxyAPI Usage Dashboard](https://github.com/zhanglunet/cliproxyapi-usage-dashboard)
+
+面向 CLIProxyAPI 的本地优先使用量与配额看板。它从 Redis 兼容使用量队列采集每次请求的 Token 消耗并写入 SQLite，按账号和模型可视化每日及最近时间窗口的用量，并在本地网页中显示 Codex 5h/7d 配额余量。
+
 ### [CPA-Manager-Plus](https://github.com/seakee/CPA-Manager-Plus)
 
 面向 CLIProxyAPI 的完整管理中心，提供请求级监控和费用预估。CPA-Manager 可按账号、模型、渠道、延迟、状态和 token 用量追踪采集到的请求；支持可编辑模型价格与一键同步 LiteLLM 价格来估算费用；用 SQLite 持久化事件；并提供面向 Codex 账号池的批量巡检、配额识别、异常账号定位、清理建议与一键执行能力，适合多账号池的日常运维管理。

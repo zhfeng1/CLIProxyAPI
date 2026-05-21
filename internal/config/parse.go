@@ -11,6 +11,7 @@ import (
 
 // ParseConfigBytes parses a YAML configuration payload into Config and applies the same
 // in-memory normalizations as LoadConfigOptional, without persisting any changes to disk.
+// Environment overrides are intentionally not applied to management-supplied payloads.
 func ParseConfigBytes(data []byte) (*Config, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("config payload is empty")

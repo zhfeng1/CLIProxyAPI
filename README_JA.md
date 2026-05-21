@@ -85,6 +85,12 @@ v6.10.0以降、CLIProxyAPIおよび [CPAMC](https://github.com/router-for-me/Cl
 
 CLIProxyAPI向けの独立した使用量永続化・可視化サービス。CLIProxyAPIデータを定期同期してSQLiteに保存し、集計APIと、使用量や各種統計を確認できる組み込みダッシュボードを提供します。
 
+このリポジトリの `docker-compose.yml` には任意の `usage-keeper` profile が含まれています。`.env.example` を `.env` にコピーし、`CPA_MANAGEMENT_KEY` を設定し、`CPA_USAGE_STATISTICS_ENABLED=true` を有効にしてから `docker compose --profile usage-keeper up -d` を実行してください。ダッシュボードは既定で `http://127.0.0.1:8080` にバインドされ、データは `./keeper` に永続化されます。
+
+### [CLIProxyAPI Usage Dashboard](https://github.com/zhanglunet/cliproxyapi-usage-dashboard)
+
+CLIProxyAPI向けのローカル優先の使用量・クォータダッシュボード。Redis互換の使用量キューからリクエストごとのToken使用量を収集してSQLiteに保存し、アカウント別・モデル別の日次および直近時間枠の使用量を可視化し、Codex 5h/7dクォータ残量をローカルWeb UIで表示します。
+
 ### [CPA-Manager-Plus](https://github.com/seakee/CPA-Manager-Plus)
 
 リクエスト単位の監視とコスト推定を備えたCLIProxyAPI向けのフル管理センターです。CPA-Managerは、収集したリクエストをアカウント、モデル、チャネル、レイテンシ、ステータス、Token使用量ごとに追跡し、編集可能なモデル価格とLiteLLM価格のワンクリック同期でコストを推定します。SQLiteでイベントを永続化し、Codexアカウントプール向けに一括検査、クォータ判定、異常アカウント検出、クリーンアップ提案、ワンクリック実行を提供し、日常的なマルチアカウント運用に適しています。

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -718,6 +719,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		}
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+	if errEnv := applyUsageQueueEnvOverrides(&cfg); errEnv != nil {
+		return nil, errEnv
+	}
 
 	// Hash remote management key if plaintext is detected (nested)
 	// We consider a value to be already hashed if it looks like a bcrypt hash ($2a$, $2b$, or $2y$ prefix).
@@ -821,6 +825,56 @@ func (cfg *Config) NormalizePluginsConfig() {
 	if cfg.Plugins.Configs == nil {
 		cfg.Plugins.Configs = map[string]PluginInstanceConfig{}
 	}
+}
+
+func applyUsageQueueEnvOverrides(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	if key, value, ok := lookupConfigEnv(
+		"CLI_PROXY_USAGE_STATISTICS_ENABLED",
+		"CPA_USAGE_STATISTICS_ENABLED",
+		"USAGE_STATISTICS_ENABLED",
+		"cli_proxy_usage_statistics_enabled",
+		"cpa_usage_statistics_enabled",
+		"usage_statistics_enabled",
+	); ok {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s value %q: %w", key, value, err)
+		}
+		cfg.UsageStatisticsEnabled = enabled
+	}
+
+	if key, value, ok := lookupConfigEnv(
+		"CLI_PROXY_REDIS_USAGE_QUEUE_RETENTION_SECONDS",
+		"CPA_REDIS_USAGE_QUEUE_RETENTION_SECONDS",
+		"REDIS_USAGE_QUEUE_RETENTION_SECONDS",
+		"cli_proxy_redis_usage_queue_retention_seconds",
+		"cpa_redis_usage_queue_retention_seconds",
+		"redis_usage_queue_retention_seconds",
+	); ok {
+		seconds, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s value %q: %w", key, value, err)
+		}
+		cfg.RedisUsageQueueRetentionSeconds = seconds
+	}
+
+	return nil
+}
+
+func lookupConfigEnv(keys ...string) (string, string, bool) {
+	for _, key := range keys {
+		if value, ok := os.LookupEnv(key); ok {
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				return key, trimmed, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // SanitizePayloadRules validates raw JSON payload rule params and drops invalid rules.
