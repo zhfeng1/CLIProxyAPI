@@ -183,7 +183,7 @@ func TestClaudeExecutor_LogsSanitizedClaudeUpstreamSignatures(t *testing.T) {
 		]
 	}`)
 
-	output := sanitizeClaudeMessagesForClaudeUpstreamWithDebug(context.Background(), body, "claude-sonnet-4-5")
+	output := sanitizeClaudeMessagesForClaudeUpstreamWithDebug(context.Background(), body, "claude-sonnet-4-5", "")
 	parts := gjson.GetBytes(output, "messages.0.content").Array()
 	if len(parts) != 2 {
 		t.Fatalf("content length = %d, want 2 after invalid thinking strip: %s", len(parts), output)

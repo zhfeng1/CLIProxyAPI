@@ -58,7 +58,7 @@ type Handler struct {
 	pluginStoreHTTPClient  pluginstore.HTTPDoer
 	pluginReleaseCacheMu   sync.Mutex
 	pluginReleaseCache     map[string]pluginReleaseCacheEntry
-	scheduledTestResults func() map[string][]scheduledtest.Result
+	scheduledTestResults   func() map[string][]scheduledtest.Result
 }
 
 // NewHandler creates a new management handler instance.
