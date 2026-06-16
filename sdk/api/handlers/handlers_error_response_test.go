@@ -69,6 +69,26 @@ func TestWriteErrorResponse_AddonHeadersEnabled(t *testing.T) {
 	}
 }
 
+func TestWriteErrorResponse_RecordsPrivateErrorForGinLogger(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler := NewBaseAPIHandlers(nil, nil)
+	handler.WriteErrorResponse(c, &interfaces.ErrorMessage{
+		StatusCode: http.StatusInternalServerError,
+		Error:      errors.New("upstream failed\nwith detail"),
+	})
+
+	if len(c.Errors) != 1 {
+		t.Fatalf("gin errors = %d, want 1", len(c.Errors))
+	}
+	if got := c.Errors.String(); !strings.Contains(got, `upstream failed\nwith detail`) {
+		t.Fatalf("gin error log text = %q, want sanitized error detail", got)
+	}
+}
+
 func TestEnrichAuthSelectionError_DefaultsTo503WithContext(t *testing.T) {
 	in := &coreauth.Error{Code: "auth_not_found", Message: "no auth available"}
 	out := enrichAuthSelectionError(in, []string{"claude"}, "claude-sonnet-4-6")

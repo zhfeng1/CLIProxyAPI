@@ -57,6 +57,7 @@ const (
 	// Stream interceptor history is intentionally bounded and not configurable in the first SDK surface.
 	maxStreamInterceptorHistoryChunks = 64
 	maxStreamInterceptorHistoryBytes  = 1 << 20
+	maxGinErrorLogRunes               = 2048
 )
 
 type pinnedAuthContextKey struct{}
@@ -1597,6 +1598,9 @@ func (h *BaseAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.Erro
 			errText = v
 		}
 	}
+	if msg != nil && msg.Error != nil {
+		recordGinErrorForRequestLog(c, errText)
+	}
 
 	body := BuildErrorResponseBody(status, errText)
 	// Append first to preserve upstream response logs, then drop duplicate payloads if already recorded.
@@ -1621,6 +1625,31 @@ func (h *BaseAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.Erro
 	}
 	c.Status(status)
 	_, _ = c.Writer.Write(body)
+}
+
+func recordGinErrorForRequestLog(c *gin.Context, errText string) {
+	if c == nil {
+		return
+	}
+	logText := sanitizeGinErrorLogText(errText)
+	if logText == "" {
+		return
+	}
+	_ = c.Error(errors.New(logText))
+}
+
+func sanitizeGinErrorLogText(errText string) string {
+	logText := strings.TrimSpace(errText)
+	if logText == "" {
+		return ""
+	}
+	logText = strings.ReplaceAll(logText, "\r", `\r`)
+	logText = strings.ReplaceAll(logText, "\n", `\n`)
+	runes := []rune(logText)
+	if len(runes) <= maxGinErrorLogRunes {
+		return logText
+	}
+	return string(runes[:maxGinErrorLogRunes]) + "...(truncated)"
 }
 
 func (h *BaseAPIHandler) LoggingAPIResponseError(ctx context.Context, err *interfaces.ErrorMessage) {
