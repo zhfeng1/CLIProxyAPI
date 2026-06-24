@@ -160,8 +160,10 @@ type authFallbackExecutor struct {
 	mu                sync.Mutex
 	executeCalls      []string
 	streamCalls       []string
+	countCalls        []string
 	executeErrors     map[string]error
 	streamFirstErrors map[string]error
+	countErrors       map[string]error
 }
 
 func (e *authFallbackExecutor) Identifier() string {
@@ -200,7 +202,14 @@ func (e *authFallbackExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, er
 	return auth, nil
 }
 
-func (e *authFallbackExecutor) CountTokens(context.Context, *Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *authFallbackExecutor) CountTokens(_ context.Context, auth *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	e.mu.Lock()
+	e.countCalls = append(e.countCalls, auth.ID)
+	err := e.countErrors[auth.ID]
+	e.mu.Unlock()
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
 	return cliproxyexecutor.Response{}, &Error{HTTPStatus: 500, Message: "not implemented"}
 }
 
@@ -221,6 +230,14 @@ func (e *authFallbackExecutor) StreamCalls() []string {
 	defer e.mu.Unlock()
 	out := make([]string, len(e.streamCalls))
 	copy(out, e.streamCalls)
+	return out
+}
+
+func (e *authFallbackExecutor) CountCalls() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]string, len(e.countCalls))
+	copy(out, e.countCalls)
 	return out
 }
 
@@ -402,6 +419,57 @@ func TestManager_ModelSupportBadRequest_FallsBackAndSuspendsAuth(t *testing.T) {
 	}
 	if state.NextRetryAfter.IsZero() {
 		t.Fatalf("expected bad auth model state cooldown to be set")
+	}
+}
+
+func TestManagerExecuteCount_NotFoundDoesNotSuspendModel(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	countErr := &Error{
+		HTTPStatus: http.StatusNotFound,
+		Message:    `{"error":{"type":"not_found_error","message":"Not Found"}}`,
+	}
+	executor := &authFallbackExecutor{
+		id:          "claude",
+		countErrors: map[string]error{"aa-auth": countErr},
+	}
+	m.RegisterExecutor(executor)
+
+	model := "mimo-v2.5-pro"
+	auth := &Auth{ID: "aa-auth", Provider: "claude"}
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "claude", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(auth.ID)
+	})
+
+	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	_, errCount := m.ExecuteCount(context.Background(), []string{"claude"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errCount == nil {
+		t.Fatalf("execute count error = nil, want 404")
+	}
+	if status := statusCodeFromError(errCount); status != http.StatusNotFound {
+		t.Fatalf("execute count status = %d, want %d", status, http.StatusNotFound)
+	}
+
+	resp, errExecute := m.Execute(context.Background(), []string{"claude"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExecute != nil {
+		t.Fatalf("execute after count_tokens 404 error = %v, want success", errExecute)
+	}
+	if string(resp.Payload) != auth.ID {
+		t.Fatalf("execute payload = %q, want %q", string(resp.Payload), auth.ID)
+	}
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to remain registered")
+	}
+	state := updated.ModelStates[model]
+	if state != nil && state.Unavailable {
+		t.Fatalf("count_tokens 404 should not mark model unavailable")
 	}
 }
 

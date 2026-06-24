@@ -1926,6 +1926,15 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				if errCtx := execCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
 				}
+				if isCountTokensEndpointNotFound(errExec) {
+					logEntryWithRequestID(execCtx).WithFields(log.Fields{
+						"provider": provider,
+						"auth_id":  auth.ID,
+						"model":    resultModel,
+					}).Warnf("count_tokens endpoint returned 404; leaving model availability unchanged")
+					authErr = errExec
+					continue
+				}
 				result.Error = &Error{Message: errExec.Error()}
 				if se, ok := errors.AsType[cliproxyexecutor.StatusError](errExec); ok && se != nil {
 					result.Error.HTTPStatus = se.StatusCode()
@@ -3245,6 +3254,13 @@ func isRequestScopedNotFoundResultError(err *Error) bool {
 		return false
 	}
 	return isRequestScopedNotFoundMessage(err.Message)
+}
+
+func isCountTokensEndpointNotFound(err error) bool {
+	if err == nil || statusCodeFromError(err) != http.StatusNotFound {
+		return false
+	}
+	return !isRequestScopedNotFoundMessage(err.Error())
 }
 
 // isRequestInvalidError returns true if the error represents a client request
