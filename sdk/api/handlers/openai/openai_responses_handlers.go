@@ -569,5 +569,8 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flush
 			framer.Flush(c.Writer)
 			_, _ = c.Writer.Write([]byte("\n"))
 		},
+		SuppressTerminalErrorAfterChunk: func(chunk []byte) bool {
+			return bytes.Contains(chunk, []byte("RETRY_REQUIRED_REASONING_516"))
+		},
 	})
 }
