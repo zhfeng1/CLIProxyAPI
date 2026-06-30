@@ -27,11 +27,6 @@ type StreamForwardOptions struct {
 	// WriteKeepAlive optionally writes a keep-alive heartbeat. It should not flush.
 	// When nil, a standard SSE comment heartbeat is used.
 	WriteKeepAlive func()
-
-	// SuppressTerminalErrorAfterChunk marks a delivered chunk as already carrying a terminal
-	// error event. If a later upstream stream error arrives, ForwardStream cancels without
-	// writing a second terminal error payload.
-	SuppressTerminalErrorAfterChunk func(chunk []byte) bool
 }
 
 func (h *BaseAPIHandler) ForwardStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage, opts StreamForwardOptions) {
@@ -67,7 +62,6 @@ func (h *BaseAPIHandler) ForwardStream(c *gin.Context, flusher http.Flusher, can
 	}
 
 	var terminalErr *interfaces.ErrorMessage
-	suppressTerminalError := false
 	for {
 		select {
 		case <-c.Request.Context().Done():
@@ -86,11 +80,6 @@ func (h *BaseAPIHandler) ForwardStream(c *gin.Context, flusher http.Flusher, can
 					}
 				}
 				if terminalErr != nil {
-					if suppressTerminalError {
-						flusher.Flush()
-						cancel(terminalErr.Error)
-						return
-					}
 					if opts.WriteTerminalError != nil {
 						opts.WriteTerminalError(terminalErr)
 					}
@@ -106,21 +95,10 @@ func (h *BaseAPIHandler) ForwardStream(c *gin.Context, flusher http.Flusher, can
 				return
 			}
 			writeChunk(chunk)
-			if !suppressTerminalError && opts.SuppressTerminalErrorAfterChunk != nil && opts.SuppressTerminalErrorAfterChunk(chunk) {
-				suppressTerminalError = true
-			}
 			flusher.Flush()
 		case errMsg, ok := <-errs:
 			if !ok {
 				continue
-			}
-			var execErr error
-			if errMsg != nil {
-				execErr = errMsg.Error
-			}
-			if suppressTerminalError {
-				cancel(execErr)
-				return
 			}
 			if errMsg != nil {
 				terminalErr = errMsg
@@ -128,6 +106,10 @@ func (h *BaseAPIHandler) ForwardStream(c *gin.Context, flusher http.Flusher, can
 					opts.WriteTerminalError(errMsg)
 					flusher.Flush()
 				}
+			}
+			var execErr error
+			if errMsg != nil {
+				execErr = errMsg.Error
 			}
 			cancel(execErr)
 			return
